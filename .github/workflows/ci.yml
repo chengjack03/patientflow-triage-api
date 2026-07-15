@@ -1,0 +1,56 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    env:
+      LLM_STUB_MODE: "true"
+      DATABASE_URL: "sqlite:///./test.db"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff
+      - name: Lint
+        run: ruff check app tests
+      - name: Run tests
+        run: pytest -q
+
+  build-and-push:
+    name: Build & Push Image to ECR
+    needs: test
+    runs-on: ubuntu-latest
+    # Only deploy from main, and only when AWS creds are configured as repo secrets.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build, tag, and push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: patientflow-triage-api
+        run: |
+          docker build -t "$REGISTRY/$REPO:${{ github.sha }}" -t "$REGISTRY/$REPO:latest" .
+          docker push "$REGISTRY/$REPO:${{ github.sha }}"
+          docker push "$REGISTRY/$REPO:latest"
