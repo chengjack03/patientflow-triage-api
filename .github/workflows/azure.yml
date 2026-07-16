@@ -1,0 +1,26 @@
+name: Deploy to Azure Container Apps
+
+# Manual trigger; deploys the current main to Azure.
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Build image in ACR
+        run: az acr build -r ${{ secrets.ACR_NAME }} -t patientflow-triage-api:${{ github.sha }} .
+      - name: Deploy Bicep
+        run: |
+          az deployment group create \
+            -g ${{ secrets.AZURE_RG }} \
+            -n patientflow \
+            -f infra-azure/main.bicep \
+            -p acrName=${{ secrets.ACR_NAME }} imageTag=${{ github.sha }} \
+               anthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }} \
+               pgAdminPassword=${{ secrets.PG_ADMIN_PASSWORD }}
