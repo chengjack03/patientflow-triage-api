@@ -9,6 +9,9 @@ param location string = resourceGroup().location
 @description('Name prefix for resources.')
 param namePrefix string = 'patientflow'
 
+@description('Location for the PostgreSQL server (some subscriptions restrict Postgres by region).')
+param pgLocation string = location
+
 @description('Name of an existing Azure Container Registry that holds the image.')
 param acrName string
 
@@ -17,7 +20,10 @@ param imageTag string = 'latest'
 
 @description('Anthropic API key (stored as a Container App secret).')
 @secure()
-param anthropicApiKey string
+param anthropicApiKey string = 'stub-not-used'
+
+@description('Whether the API runs in LLM stub mode (no real Anthropic calls).')
+param llmStubMode string = 'true'
 
 @description('PostgreSQL administrator password.')
 @secure()
@@ -26,9 +32,12 @@ param pgAdminPassword string
 @description('PostgreSQL administrator login.')
 param pgAdminUser string = 'pfadmin'
 
+@description('Suffix for the Postgres server name (override to pick a fresh name if a prior attempt reserved the default one).')
+param pgNameSuffix string = uniqueString(resourceGroup().id)
+
 var logName = '${namePrefix}-logs'
 var envName = '${namePrefix}-env'
-var pgServerName = '${namePrefix}-pg-${uniqueString(resourceGroup().id)}'
+var pgServerName = '${namePrefix}-pg-${pgNameSuffix}'
 var pgDbName = 'patientflow'
 var appName = '${namePrefix}-api'
 
@@ -61,7 +70,7 @@ resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
 
 resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview' = {
   name: pgServerName
-  location: location
+  location: pgLocation
   sku: {
     name: 'Standard_B1ms'
     tier: 'Burstable'
@@ -96,7 +105,7 @@ resource pgFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@202
   }
 }
 
-var databaseUrl = 'postgresql+psycopg2://${pgAdminUser}:${pgAdminPassword}@${pg.properties.fullyQualifiedDomainName}:5432/${pgDbName}?sslmode=require'
+var databaseUrl = 'postgresql+psycopg2://${uriComponent(pgAdminUser)}:${uriComponent(pgAdminPassword)}@${pg.properties.fullyQualifiedDomainName}:5432/${pgDbName}?sslmode=require'
 
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: appName
@@ -134,7 +143,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           }
           env: [
             { name: 'ENVIRONMENT', value: 'production' }
-            { name: 'LLM_STUB_MODE', value: 'false' }
+            { name: 'LLM_STUB_MODE', value: llmStubMode }
             { name: 'ANTHROPIC_API_KEY', secretRef: 'anthropic-api-key' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }
           ]
